@@ -17,6 +17,7 @@ class Repo(BaseModel):
 
 class chat_schema(BaseModel):
     messages:Annotated[list[BaseMessage],add_messages]
+    question:Optional[str]=None
     jd:Optional[str]=None
     filename:str
     resume_content:Optional[str]=None

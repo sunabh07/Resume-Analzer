@@ -39,6 +39,8 @@ class Workflow():
         graph.add_node("fetch_education", self.fetch_education)
         graph.add_node("fetch_skills", self.fetch_skills)
         graph.add_node("fetch_projects", self.fetch_projects)
+        graph.add_node("dummy_node", lambda state: state)
+        graph.add_node("question_node", self.question_node) # Placeholder for question handling logic
 
         graph.add_node("finalize", self.finalize)
 
@@ -46,26 +48,33 @@ class Workflow():
         graph.add_edge(START, "chat_node")
 
         # Merge
-        graph.add_edge("chat_node", "fetch_education")
-        graph.add_edge("chat_node", "fetch_skills")
-        graph.add_edge("chat_node", "fetch_projects")
-        graph.add_edge("chat_node", "fetch_user")
+        def route_from_chat(state: chat_schema):
+            if state.question:
+                return "question_node"
+            else:
+                return "dummy_node"
+        
+        graph.add_conditional_edges("chat_node",route_from_chat)
+
+        graph.add_edge("dummy_node", "fetch_education")
+        graph.add_edge("dummy_node", "fetch_skills")
+        graph.add_edge("dummy_node", "fetch_projects")
+        graph.add_edge("dummy_node", "fetch_user")
 
         graph.add_edge("fetch_user", "finalize")
         graph.add_edge("fetch_education", "finalize")
         graph.add_edge("fetch_projects", "finalize")
         graph.add_edge("fetch_skills", "finalize")
 
+        graph.add_edge("question_node", END) 
         graph.add_edge("finalize", END)
 
 
         logger.info("Workflow compiled successfully")
 
-        # app=graph.compile()
-        
-        # print(app.get_graph().draw_mermaid())
-        
-        return graph.compile()
+        app=graph.compile()
+ 
+        return app
 
         
 # ----------- With JD nodes ------------ #
@@ -82,22 +91,33 @@ class Workflow():
 
 Extract ONLY the Job Description (JD) from the user message.
 
+If you think user wants to ask questions regarding resume building or wants to ask any question related to 
+resume then you will not extract any JD and you will simply answer the question asked by the user and you
+will not say anything about JD in that case.
+and you will respond like 
+
+"QUESTION": and then the actual question asked by the user without any extra text.
 
 User Message: {message}
 
 """
 
             response = await llm.ainvoke(prompt)
+            if "QUESTION" in response.content:
+                question = response.content.split("QUESTION:")[1].strip()
+                logger.info(f"Extracted question: {question}")
+                return {"question": question, "jd": ""}
+            else:
 
-            jd = response.content.strip()
+                jd = response.content.strip()
 
-            logger.info(f"JD Extracted: {jd}")
+                logger.info(f"JD Extracted: {jd}")
 
-            return {"jd": jd}
+                return {"jd": jd,"question": None}
 
         except Exception as e:
             logger.error(f"Error in chat_node: {str(e)}")
-            return {"jd": ""}
+            return {"jd": "", "question": None}
 
 
     
@@ -286,5 +306,17 @@ Rules:
         return {"messages":[AIMessage(content=response.content.strip())]}
     
 
+    async def question_node(self, state: chat_schema):
+        question=state.question
+        logger.info(f"Handling question: {question}")
+        resume_content=state.resume_content
+        prompt=f"""
+        You are an helpful assistant you will be given a question by the user regarding resume or anything or it can be related to 
+        imporve his or her skills or whether questions regarding skills or interview questions. you have to respond according to that
+        Question: {question}
+        Resume content: {resume_content}
 
-
+"""
+        response=await llm.ainvoke(prompt)
+        logger.info(f"Response to question: {response.content}")
+        return {"messages":[AIMessage(content=response.content.strip())]}
